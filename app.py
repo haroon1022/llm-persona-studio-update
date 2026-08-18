@@ -4,11 +4,13 @@ import io
 import os
 import re
 import secrets
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+from streamlit_cookies_controller import CookieController
 
 from database import (
     get_all_projects,
@@ -36,8 +38,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+cookie_controller = CookieController(key="llm_persona_cookie_controller")
 init_db()
 
+BROWSER_COOKIE_NAME = "llm_persona_browser_id"
 FEEDBACK_FORM_URL = "https://forms.office.com/Pages/ResponsePage.aspx?id=OTEyrjoJKk2Bpl0zS82QGV34qXS2kE1IiMcEFqUpwmVUOFc0RFpZWDE3NDRWUTBYV0JBRVRaWlBJSC4u"
 ALLOWED_ATTACHMENT_TYPES = ["png", "jpg", "jpeg", "pdf", "docx", "txt", "md"]
 
@@ -53,6 +57,30 @@ def secret_value(name: str, default: str = "") -> str:
     except Exception:
         pass
     return os.getenv(name, default)
+
+
+def get_browser_id() -> str:
+    """Return a persistent anonymous identifier for this browser."""
+    if "browser_id" in st.session_state:
+        return str(st.session_state.browser_id)
+
+    browser_id = ""
+    try:
+        browser_id = str(st.context.cookies.get(BROWSER_COOKIE_NAME, "") or "").strip()
+    except Exception:
+        browser_id = str(cookie_controller.get(BROWSER_COOKIE_NAME) or "").strip()
+
+    if not browser_id:
+        browser_id = "B-" + secrets.token_hex(16)
+        cookie_controller.set(
+            BROWSER_COOKIE_NAME,
+            browser_id,
+            expires=datetime.now() + timedelta(days=365),
+            same_site="lax",
+        )
+
+    st.session_state.browser_id = browser_id
+    return browser_id
 
 
 def ensure_state() -> None:
@@ -514,7 +542,7 @@ def page_project() -> None:
         if not title.strip() or not description.strip() or not target_task.strip():
             st.error("Please complete project title, description and main task before generating personas.")
             return
-        project_id = insert_project(title.strip(), description.strip(), platform, domain, target_task.strip())
+        project_id = insert_project(title.strip(), description.strip(), platform, domain, target_task.strip(), get_browser_id())
         project = {
             "id": project_id,
             "title": title.strip(),
@@ -733,7 +761,7 @@ with st.sidebar:
         st.session_state.chat_history = {}
         set_page("Project")
 
-    projects = get_all_projects()
+    projects = get_all_projects(get_browser_id())
     if projects:
         for project_item in projects:
             title = str(project_item.get("title", "Untitled project"))

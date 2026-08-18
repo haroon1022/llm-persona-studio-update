@@ -34,10 +34,15 @@ def init_db() -> None:
                 description TEXT NOT NULL,
                 platform TEXT,
                 domain TEXT,
-                target_task TEXT
+                target_task TEXT,
+                browser_id TEXT
             )
             """
         )
+        project_columns = {row["name"] for row in cur.execute("PRAGMA table_info(projects)").fetchall()}
+        if "browser_id" not in project_columns:
+            cur.execute("ALTER TABLE projects ADD COLUMN browser_id TEXT")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_browser_id ON projects(browser_id)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS personas (
@@ -95,15 +100,22 @@ def now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
-def insert_project(title: str, description: str, platform: str, domain: str, target_task: str) -> int:
+def insert_project(
+    title: str,
+    description: str,
+    platform: str,
+    domain: str,
+    target_task: str,
+    browser_id: str,
+) -> int:
     with closing(get_connection()) as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO projects (created_at, title, description, platform, domain, target_task)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO projects (created_at, title, description, platform, domain, target_task, browser_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (now_iso(), title, description, platform, domain, target_task),
+            (now_iso(), title, description, platform, domain, target_task, browser_id),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -117,9 +129,12 @@ def get_project(project_id: Optional[int]) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
-def get_all_projects() -> List[Dict[str, Any]]:
+def get_all_projects(browser_id: str) -> List[Dict[str, Any]]:
     with closing(get_connection()) as conn:
-        rows = conn.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM projects WHERE browser_id = ? ORDER BY id DESC",
+            (browser_id,),
+        ).fetchall()
         return [dict(row) for row in rows]
 
 
