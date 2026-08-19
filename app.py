@@ -1,17 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import re
 import secrets
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
-from streamlit_cookies_controller import CookieController
-
 from database import (
     get_all_projects,
     get_attachments_for_project,
@@ -38,10 +36,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-cookie_controller = CookieController(key="llm_persona_cookie_controller")
 init_db()
 
-BROWSER_COOKIE_NAME = "llm_persona_browser_id"
 FEEDBACK_FORM_URL = "https://forms.office.com/Pages/ResponsePage.aspx?id=OTEyrjoJKk2Bpl0zS82QGV34qXS2kE1IiMcEFqUpwmVUOFc0RFpZWDE3NDRWUTBYV0JBRVRaWlBJSC4u"
 ALLOWED_ATTACHMENT_TYPES = ["png", "jpg", "jpeg", "pdf", "docx", "txt", "md"]
 
@@ -60,24 +56,37 @@ def secret_value(name: str, default: str = "") -> str:
 
 
 def get_browser_id() -> str:
-    """Return a persistent anonymous identifier for this browser."""
+    """Return a stable anonymous identifier for this browser on Streamlit Cloud.
+
+    Streamlit already places an XSRF cookie in each browser. We hash that cookie
+    so the raw cookie value is never stored in the project database. The same
+    browser keeps the same identifier across page reloads, while another browser
+    or device receives a different identifier.
+    """
     if "browser_id" in st.session_state:
         return str(st.session_state.browser_id)
 
-    browser_id = ""
+    xsrf_value = ""
     try:
-        browser_id = str(st.context.cookies.get(BROWSER_COOKIE_NAME, "") or "").strip()
+        cookies = st.context.cookies
+        xsrf_value = str(
+            cookies.get("_streamlit_xsrf", "")
+            or cookies.get("_xsrf", "")
+            or ""
+        ).strip()
     except Exception:
-        browser_id = str(cookie_controller.get(BROWSER_COOKIE_NAME) or "").strip()
+        xsrf_value = ""
 
-    if not browser_id:
+    if xsrf_value:
+        digest = hashlib.sha256(
+            ("llm-persona-studio|" + xsrf_value).encode("utf-8")
+        ).hexdigest()
+        browser_id = "B-" + digest[:32]
+    else:
+        # Safety fallback for environments where Streamlit exposes no XSRF cookie.
+        # This keeps sessions isolated, although persistence across a full reload
+        # cannot be guaranteed without a browser cookie.
         browser_id = "B-" + secrets.token_hex(16)
-        cookie_controller.set(
-            BROWSER_COOKIE_NAME,
-            browser_id,
-            expires=datetime.now() + timedelta(days=365),
-            same_site="lax",
-        )
 
     st.session_state.browser_id = browser_id
     return browser_id
