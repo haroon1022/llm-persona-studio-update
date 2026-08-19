@@ -39,10 +39,6 @@ def init_db() -> None:
             )
             """
         )
-        project_columns = {row["name"] for row in cur.execute("PRAGMA table_info(projects)").fetchall()}
-        if "browser_id" not in project_columns:
-            cur.execute("ALTER TABLE projects ADD COLUMN browser_id TEXT")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_projects_browser_id ON projects(browser_id)")
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS personas (
@@ -93,6 +89,12 @@ def init_db() -> None:
             )
             """
         )
+
+        # Backward-compatible migration for databases created by earlier versions.
+        project_columns = {row[1] for row in cur.execute("PRAGMA table_info(projects)").fetchall()}
+        if "browser_id" not in project_columns:
+            cur.execute("ALTER TABLE projects ADD COLUMN browser_id TEXT")
+
         conn.commit()
 
 
@@ -106,7 +108,7 @@ def insert_project(
     platform: str,
     domain: str,
     target_task: str,
-    browser_id: str,
+    browser_id: Optional[str] = None,
 ) -> int:
     with closing(get_connection()) as conn:
         cur = conn.cursor()
@@ -121,20 +123,29 @@ def insert_project(
         return int(cur.lastrowid)
 
 
-def get_project(project_id: Optional[int]) -> Optional[Dict[str, Any]]:
+def get_project(project_id: Optional[int], browser_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     if not project_id:
         return None
     with closing(get_connection()) as conn:
-        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if browser_id is None:
+            row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM projects WHERE id = ? AND browser_id = ?",
+                (project_id, browser_id),
+            ).fetchone()
         return dict(row) if row else None
 
 
-def get_all_projects(browser_id: str) -> List[Dict[str, Any]]:
+def get_all_projects(browser_id: Optional[str] = None) -> List[Dict[str, Any]]:
     with closing(get_connection()) as conn:
-        rows = conn.execute(
-            "SELECT * FROM projects WHERE browser_id = ? ORDER BY id DESC",
-            (browser_id,),
-        ).fetchall()
+        if browser_id is None:
+            rows = conn.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM projects WHERE browser_id = ? ORDER BY id DESC",
+                (browser_id,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
 

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import io
 import os
 import re
 import secrets
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+from streamlit_cookies_manager import CookieManager
+
 from database import (
     get_all_projects,
     get_attachments_for_project,
@@ -36,6 +38,22 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Anonymous browser identifier used only to keep each browser's projects private.
+# CookieManager waits until the browser cookie state is available before the app continues.
+cookies = CookieManager(prefix="llm_persona_studio/")
+if not cookies.ready():
+    st.stop()
+
+BROWSER_COOKIE_NAME = "browser_id"
+browser_id = cookies.get(BROWSER_COOKIE_NAME)
+if not browser_id:
+    browser_id = uuid.uuid4().hex
+    cookies[BROWSER_COOKIE_NAME] = browser_id
+    cookies.save()
+
+BROWSER_ID = str(browser_id)
+
 init_db()
 
 FEEDBACK_FORM_URL = "https://forms.office.com/Pages/ResponsePage.aspx?id=OTEyrjoJKk2Bpl0zS82QGV34qXS2kE1IiMcEFqUpwmVUOFc0RFpZWDE3NDRWUTBYV0JBRVRaWlBJSC4u"
@@ -53,43 +71,6 @@ def secret_value(name: str, default: str = "") -> str:
     except Exception:
         pass
     return os.getenv(name, default)
-
-
-def get_browser_id() -> str:
-    """Return a stable anonymous identifier for this browser on Streamlit Cloud.
-
-    Streamlit already places an XSRF cookie in each browser. We hash that cookie
-    so the raw cookie value is never stored in the project database. The same
-    browser keeps the same identifier across page reloads, while another browser
-    or device receives a different identifier.
-    """
-    if "browser_id" in st.session_state:
-        return str(st.session_state.browser_id)
-
-    xsrf_value = ""
-    try:
-        cookies = st.context.cookies
-        xsrf_value = str(
-            cookies.get("_streamlit_xsrf", "")
-            or cookies.get("_xsrf", "")
-            or ""
-        ).strip()
-    except Exception:
-        xsrf_value = ""
-
-    if xsrf_value:
-        digest = hashlib.sha256(
-            ("llm-persona-studio|" + xsrf_value).encode("utf-8")
-        ).hexdigest()
-        browser_id = "B-" + digest[:32]
-    else:
-        # Safety fallback for environments where Streamlit exposes no XSRF cookie.
-        # This keeps sessions isolated, although persistence across a full reload
-        # cannot be guaranteed without a browser cookie.
-        browser_id = "B-" + secrets.token_hex(16)
-
-    st.session_state.browser_id = browser_id
-    return browser_id
 
 
 def ensure_state() -> None:
@@ -123,7 +104,7 @@ def refresh_personas() -> None:
 
 def load_project_into_session(project_id: int, page: Optional[str] = None) -> None:
     """Load an existing project, its personas and chat logs into session state."""
-    project = get_project(project_id)
+    project = get_project(project_id, BROWSER_ID)
     if not project:
         st.warning("This project could not be found.")
         return
@@ -324,7 +305,7 @@ def maybe_feedback_reminder() -> None:
 def get_current_project() -> Dict[str, Any]:
     if st.session_state.project:
         return st.session_state.project
-    project = get_project(st.session_state.project_id)
+    project = get_project(st.session_state.project_id, BROWSER_ID)
     if project:
         st.session_state.project = project
     return project or {}
@@ -551,7 +532,7 @@ def page_project() -> None:
         if not title.strip() or not description.strip() or not target_task.strip():
             st.error("Please complete project title, description and main task before generating personas.")
             return
-        project_id = insert_project(title.strip(), description.strip(), platform, domain, target_task.strip(), get_browser_id())
+        project_id = insert_project(title.strip(), description.strip(), platform, domain, target_task.strip(), BROWSER_ID)
         project = {
             "id": project_id,
             "title": title.strip(),
@@ -770,7 +751,7 @@ with st.sidebar:
         st.session_state.chat_history = {}
         set_page("Project")
 
-    projects = get_all_projects(get_browser_id())
+    projects = get_all_projects(BROWSER_ID)
     if projects:
         for project_item in projects:
             title = str(project_item.get("title", "Untitled project"))
