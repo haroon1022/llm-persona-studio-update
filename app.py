@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 import streamlit as st
+
+# Compatibility shim for streamlit-cookies-manager 0.2.0 on newer Streamlit versions.
+# The dependency still uses the removed ``st.cache`` decorator internally.
+if not hasattr(st, "cache"):
+    st.cache = st.cache_data
+
 from streamlit_cookies_manager import CookieManager
 
 from database import (
