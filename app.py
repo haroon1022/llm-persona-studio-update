@@ -398,7 +398,7 @@ def render_project_attachments(project: Dict[str, Any]) -> None:
             for item in attachments:
                 st.write(f"**{item.get('filename')}** ({item.get('file_type')})")
                 if str(item.get("mime_type", "")).startswith("image/") and Path(item.get("path", "")).exists():
-                    st.image(item.get("path"), caption=item.get("filename"), use_column_width=True)
+                    st.image(item.get("path"), caption=item.get("filename"), width="stretch")
                 elif item.get("extracted_text"):
                     st.caption("Text extracted and available for persona review.")
                 else:
